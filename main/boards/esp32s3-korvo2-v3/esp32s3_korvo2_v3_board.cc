@@ -3,6 +3,7 @@
 #include "display/lcd_display.h"
 #include "application.h"
 #include "button.h"
+
 #include "config.h"
 #include "i2c_device.h"
 #include "iot/thing_manager.h"
@@ -13,31 +14,14 @@
 #include <driver/spi_common.h>
 #include <wifi_station.h>
 
-#define TAG "LichuangDevBoard"
+#define TAG "esp32s3_korvo2_v3"
 
-
-class Pca9557 : public I2cDevice {
-public:
-    Pca9557(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr) {
-        WriteReg(0x01, 0x03);
-        WriteReg(0x03, 0xf8);
-    }
-
-    void SetOutputState(uint8_t bit, uint8_t level) {
-        uint8_t data = ReadReg(0x01);
-        data = (data & ~(1 << bit)) | (level << bit);
-        WriteReg(0x01, data);
-    }
-};
-
-
-class LichuangDevBoard : public WifiBoard {
+class esp32s3_korvo2_v3_board : public WifiBoard
+{
 private:
-    i2c_master_bus_handle_t i2c_bus_;
-    i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
+    i2c_master_bus_handle_t i2c_bus_;
     LcdDisplay* display_;
-    Pca9557* pca9557_;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -54,16 +38,13 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
-
-        // Initialize PCA9557
-        pca9557_ = new Pca9557(i2c_bus_, 0x19);
     }
 
     void InitializeSpi() {
         spi_bus_config_t buscfg = {};
-        buscfg.mosi_io_num = GPIO_NUM_40;
+        buscfg.mosi_io_num = GPIO_NUM_0;
         buscfg.miso_io_num = GPIO_NUM_NC;
-        buscfg.sclk_io_num = GPIO_NUM_41;
+        buscfg.sclk_io_num = GPIO_NUM_1;
         buscfg.quadwp_io_num = GPIO_NUM_NC;
         buscfg.quadhd_io_num = GPIO_NUM_NC;
         buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
@@ -91,10 +72,10 @@ private:
         // 液晶屏控制IO初始化
         ESP_LOGD(TAG, "Install panel IO");
         esp_lcd_panel_io_spi_config_t io_config = {};
-        io_config.cs_gpio_num = GPIO_NUM_NC;
-        io_config.dc_gpio_num = GPIO_NUM_39;
-        io_config.spi_mode = 2;
-        io_config.pclk_hz = 80 * 1000 * 1000;
+        io_config.cs_gpio_num = GPIO_NUM_46;
+        io_config.dc_gpio_num = GPIO_NUM_2;
+        io_config.spi_mode = 0;
+        io_config.pclk_hz = 60 * 1000 * 1000;
         io_config.trans_queue_depth = 10;
         io_config.lcd_cmd_bits = 8;
         io_config.lcd_param_bits = 8;
@@ -107,30 +88,31 @@ private:
         panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
         panel_config.bits_per_pixel = 16;
         ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel));
-        
-        esp_lcd_panel_reset(panel);
-        pca9557_->SetOutputState(0, 0);
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY));
+        ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
+        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
 
-        esp_lcd_panel_init(panel);
-        esp_lcd_panel_invert_color(panel, true);
-        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
-        esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         display_ = new LcdDisplay(panel_io, panel, DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT,
-                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
     // 物联网初始化，添加对 AI 可见设备
     void InitializeIot() {
         auto& thing_manager = iot::ThingManager::GetInstance();
         thing_manager.AddThing(iot::CreateThing("Speaker"));
+
     }
 
 public:
-    LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO) {
+    esp32s3_korvo2_v3_board() : boot_button_(BOOT_BUTTON_GPIO)
+    {
+        ESP_LOGI(TAG, "Initializing esp32s3_korvo2_v3 Board");
         InitializeI2c();
         InitializeSpi();
-        InitializeSt7789Display();
         InitializeButtons();
+        InitializeSt7789Display();  
         InitializeIot();
     }
 
@@ -139,15 +121,16 @@ public:
         if (audio_codec == nullptr) {
             audio_codec = new BoxAudioCodec(i2c_bus_, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
                 AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-                GPIO_NUM_NC, AUDIO_CODEC_ES8311_ADDR, AUDIO_CODEC_ES7210_ADDR, AUDIO_INPUT_REFERENCE);
+                AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR, AUDIO_CODEC_ES7210_ADDR, AUDIO_INPUT_REFERENCE);
             audio_codec->SetOutputVolume(AUDIO_DEFAULT_OUTPUT_VOLUME);
         }
         return audio_codec;
     }
 
-    virtual Display* GetDisplay() override {
+    virtual Display *GetDisplay() override
+    {
         return display_;
     }
 };
 
-DECLARE_BOARD(LichuangDevBoard);
+DECLARE_BOARD(esp32s3_korvo2_v3_board);
