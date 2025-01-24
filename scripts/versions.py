@@ -8,6 +8,9 @@ import zipfile
 import oss2
 import json
 
+# 切换到项目根目录
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 def get_chip_id_string(chip_id):
     return {
         0x0000: "esp32",
@@ -149,7 +152,10 @@ def main():
     print(f"Versions written to {versions_path}")
 
     # copy versions.json to server
-    versions_config_path = os.environ['VERSIONS_CONFIG_PATH']
+    versions_config_path = os.environ.get('VERSIONS_CONFIG_PATH')
+    if not versions_config_path:
+        print("VERSIONS_CONFIG_PATH is not set")
+        exit(1)
     ret = os.system(f'scp {versions_path} {versions_config_path}')
     if ret != 0:
         print(f'Failed to copy versions.json to server')
